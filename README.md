@@ -31,7 +31,8 @@ In these practical assignments, you will find examples of the following techniqu
 ## 🛠️ Technologies Used
 
 * **Programming Language**: R
-* **IDE**: RStudio
+* **IDE**: VS Code
+* **Data Format**: Parquet for efficient storage and retrieval of large datasets.
 * **Reporting Format**: Quarto
 * **Key R Libraries**:
     * `tidyverse` (including `dplyr`, `ggplot2`, `readr`) for data manipulation and visualization.
