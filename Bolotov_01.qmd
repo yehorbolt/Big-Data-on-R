@@ -66,7 +66,7 @@ glimpse(taxi_data)
 
 ### Step 2: Inspect Raw Categorical Columns
 
-Before making any changes, it is essential to inspect the raw data. This helps us understand the unique values in our categorical columns and confirms that the data matches our expectations from the data dictionary.
+Before making any changes, it is necessary to verify the source data. This will help us understand the unique values in our categorical columns and confirm that the data meets our expectations for the data dictionary.
 
 ```{r data-audit, echo=TRUE, results='asis'}
 all_cols <- names(taxi_data)
@@ -83,7 +83,8 @@ for (col_name in all_cols) {
     cat(paste("- **Latest Record:**", max(col_data, na.rm = TRUE), "\n"))
     
   # Condition for numeric columns that are not IDs
-  } else if (is.numeric(col_data) && !grepl("ID$", col_name) && n_distinct(col_data) > 15) {
+  } else if (is.numeric(col_data) && !grepl("ID$", col_name) 
+   && n_distinct(col_data) > 15) {
     cat("- **Type:** Continuous Numeric\n")
     cat("- **Summary Stats:**\n")
     print(summary(col_data))
@@ -106,14 +107,15 @@ for (col_name in all_cols) {
 
 #### Findings from Raw Data Inspection:
 
-* **Invalid Records**: A large block of **540,149 trips have NA values** in `payment_type` and several other columns, making them invalid for analysis.
-* **Special Cases & Errors**: Other columns contain logically impossible values (e.g., `passenger_count` of 0), special fare codes (`RatecodeID` = 99 for group rides), and negative values in fare columns that should be excluded from a standard fare model.
+* **Invalid records**: A large block of **540,149 trips has a value of NA** in the `payment_type` column and several other columns, making them invalid for analysis.
+
+* **Special cases and errors**: Other columns contain logically impossible values (e.g., `passenger_count` = 0), special fare codes (`RatecodeID` = 99 for group trips), and negative values in fare columns, which should be excluded from the standard fare model.
 
 ### Step 3: Clean, Filter, and Transform Data
 
 Based on our inspection, we now apply a comprehensive set of filters to create a high-quality dataset for modeling.
 
-```{r clean-and-transform, include=FALSE}
+```{r clean-and-transform, warning=FALSE, echo=TRUE}
 taxi_clean <- taxi_data %>%
   # Filter
   filter(
@@ -131,7 +133,8 @@ taxi_clean <- taxi_data %>%
     payment_type = factor(payment_type),
     pickup_hour = as.numeric(format(tpep_pickup_datetime, "%H")),
     day_of_week = factor(weekdays(tpep_pickup_datetime),
-                         levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))
+    levels = c("Monday", "Tuesday", "Wednesday", 
+     "Thursday", "Friday", "Saturday", "Sunday"))
   ) %>%
   # Remove columns with 1 unique value
   dplyr::select(where(~n_distinct(.) > 1))
@@ -139,17 +142,17 @@ taxi_clean <- taxi_data %>%
 write_parquet(taxi_clean, "Data/taxi_clean_data.parquet")
 ```
 
-Based on our inspection, we now apply a comprehensive set of filters to create a high-quality dataset for modeling. The key cleaning steps include:
+Based on our verification, we apply a comprehensive set of filters to create a high-quality dataset for modeling. The main cleaning steps include:
 
-* Removing the 540,149 rows with `NA` values.
-* Filtering to include only standard-rate trips (`RatecodeID` = 1).
-* Ensuring `passenger_count` is greater than 0.
-* Removing trips with a `trip_distance` of 0 or less.
-* Filtering out any records with a `total_amount` less than a logical minimum (e.g., \$2.50).
+* Removing 540,149 rows with `NA` values.
+* Filtering to include only trips with the standard rate (`RatecodeID` = 1).
+* Checking that `passenger_count` is greater than 0.
+* Removing trips with `trip_distance` equal to or less than 0.
+* Filtering out all records with `total_amount` less than a logical minimum (e.g., $2.50).
 
 ### Step 4: Verify the Cleaned Data
 
-```{r verify-clean-data, echo=FALSE}
+```{r verify-clean-data, warning=FALSE, echo=TRUE}
 glimpse(taxi_clean)
 ```
 
@@ -165,17 +168,19 @@ EDA helps us understand the underlying patterns in the data before modeling.
 
 First, we examine the distributions of our target variable, `total_amount`, and the primary predictor, `trip_distance`.
 
-```{r eda-univariate, message=FALSE, warning=FALSE, echo=FALSE}
+```{r eda-univariate, warning=FALSE, echo=TRUE}
 # Distribution of Total Amount
 ggplot(taxi_clean, aes(x = total_amount)) +
   geom_histogram(bins = 50, fill = "skyblue", color = "black") +
-  labs(title = "Distribution of Total Trip Amount", x = "Total Amount ($)", y = "Frequency") +
+  labs(title = "Distribution of Total Trip Amount", 
+   x = "Total Amount ($)", y = "Frequency") +
   theme_minimal()
 
 # Distribution of Trip Distance
 ggplot(taxi_clean, aes(x = trip_distance)) +
   geom_histogram(bins = 50, fill = "salmon", color = "black") +
-  labs(title = "Distribution of Trip Distance", x = "Trip Distance (miles)", y = "Frequency") +
+  labs(title = "Distribution of Trip Distance", 
+   x = "Trip Distance (miles)", y = "Frequency") +
   theme_minimal()
 ```
 
@@ -185,20 +190,22 @@ ggplot(taxi_clean, aes(x = trip_distance)) +
 
 Next, we visualize the relationships between key variables.
 
-```{r eda-bivariate, message=FALSE, warning=FALSE, echo=FALSE}
+```{r eda-bivariate, warning=FALSE, echo=TRUE}
 # Scatter plot of Distance vs. Amount using a sample
 set.seed(123)
 taxi_sample <- taxi_clean %>% slice_sample(n = 5000)
 ggplot(taxi_sample, aes(x = trip_distance, y = total_amount)) +
   geom_point(alpha = 0.5, color = "blue") +
   geom_smooth(method = "lm", color = "red") +
-  labs(title = "Trip Distance vs. Total Amount", x = "Trip Distance (miles)", y = "Total Amount ($)") +
+  labs(title = "Trip Distance vs. Total Amount", 
+   x = "Trip Distance (miles)", y = "Total Amount ($)") +
   theme_minimal()
 
 # Box plot of Amount vs. Payment Type
-ggplot(taxi_clean, aes(x = payment_type, y = total_amount, fill = payment_type)) +
-  geom_boxplot() +
-  labs(title = "Total Amount by Payment Type", x = "Payment Type (1=Card, 2=Cash, etc.)", y = "Total Amount ($)") +
+ggplot(taxi_clean, aes(x = payment_type, y = total_amount, 
+  fill = payment_type)) + geom_boxplot() +
+  labs(title = "Total Amount by Payment Type", 
+   x = "Payment Type (1=Card, 2=Cash, etc.)", y = "Total Amount ($)") +
   scale_fill_viridis_d() +
   theme_minimal()
 ```
@@ -209,13 +216,14 @@ ggplot(taxi_clean, aes(x = payment_type, y = total_amount, fill = payment_type))
 
 A correlation matrix provides a quantitative overview of the linear relationships between all numeric variables.
 
-```{r eda-correlation, message=FALSE, warning=FALSE, echo=FALSE, fig.width=10, fig.height=10}
+```{r eda-correlation, warning=FALSE, echo=TRUE, fig.width=10, fig.height=10}
 # Select numeric variables and compute correlation matrix
 numeric_vars <- taxi_clean %>% dplyr::select(where(is.numeric))
 
 # Now that numeric_vars is created correctly, the next lines will work.
 cor_matrix <- cor(numeric_vars)
-corrplot(cor_matrix, method = "circle", type = "upper", order = "hclust", tl.col = "black", tl.srt = 45)
+corrplot(cor_matrix, method = "circle", type = "upper", 
+ order = "hclust", tl.col = "black", tl.srt = 45)
 ```
 
 
@@ -231,7 +239,7 @@ Based on our EDA, we will now build regression models to predict `total_amount`.
 
 We start with a simple model using only `trip_distance` as the predictor.
 
-```{r simple-regression, message=FALSE, warning=FALSE, echo=FALSE}
+```{r simple-regression, warning=FALSE, echo=TRUE}
 model1 <- lm(total_amount ~ trip_distance, data = taxi_clean)
 summary(model1)
 ```
@@ -242,38 +250,38 @@ summary(model1)
 
 Next, we build a multiple regression model, adding `passenger_count`, `payment_type`, and `pickup_hour` to see if we can improve the prediction.
 
-```{r multiple-regression, message=FALSE, warning=FALSE, echo=FALSE}
-model2 <- lm(total_amount ~ trip_distance + passenger_count + payment_type + pickup_hour, data = taxi_clean)
+```{r multiple-regression, warning=FALSE, echo=TRUE}
+model2 <- lm(total_amount ~ trip_distance + passenger_count 
+ + payment_type + pickup_hour, data = taxi_clean)
 summary(model2)
 ```
 
 **Interpretation**:
-* The effect of `trip_distance` remains strong and consistent. 
-* Holding other factors constant, choosing cash (`payment_type2`) is associated with a decrease in the total amount by approximately \$4.34 compared to paying with a credit card (the baseline). This likely reflects that tips are often not recorded for cash payments. 
+* The impact of `trip_distance` remains strong and stable.
+* All other factors being equal, choosing cash (`payment_type2`) is associated with a decrease in the total amount of approximately $4.34 compared to paying by credit card (the baseline). This likely reflects the fact that tips for cash payments are often not recorded. 
 * Each additional `passenger_count` and later `pickup_hour` are also statistically significant predictors. 
-* The **Adjusted R-squared increased to 0.907**, indicating that our new variables provide a small but significant improvement in the model's explanatory power. 
+* **The adjusted R-squared increased to 0.907**, indicating that our new variables provide a small but significant improvement in the explanatory power of the model. 
 
 ### Checking Model 2 Assumptions
 
 Finally, we check the diagnostic plots for our final model to ensure the assumptions of linear regression are reasonably met.
 
-```{r diagnostics-model2, message=FALSE, warning=FALSE, echo=FALSE}
-# Step 1: Create a random sample of the data to avoid overplotting.
+```{r diagnostics-model2, warning=FALSE, echo=TRUE}
+# Create a random sample of the data to avoid overplotting.
 # 10,000 rows is more than enough to see the patterns clearly.
 set.seed(123)
 diagnostics_sample <- taxi_clean %>% slice_sample(n = 10000)
 
-# Step 2: Re-run the final model ON THE SAMPLE DATA ONLY.
-# This is a temporary model just for creating the plots.
-model2_for_plotting <- lm(total_amount ~ trip_distance + passenger_count + payment_type + pickup_hour, 
-                          data = diagnostics_sample)
+# SRe-run the final model ON THE SAMPLE DATA ONLY.
+model2_for_plotting <- lm(total_amount ~ trip_distance 
+  + passenger_count + payment_type + pickup_hour, 
+  data = diagnostics_sample)
 
-# Step 3: Use augment() from the broom package to get model metrics (like residuals).
+# Step 3: Use augment() from the broom package to 
+# get model metrics (like residuals).
 model_augmented <- augment(model2_for_plotting)
 
 # --- Plot 1: Residuals vs. Fitted ---
-# This plot helps check for linearity and equal variance (homoscedasticity).
-# We are looking for a random scatter of points with no obvious patterns.
 ggplot(model_augmented, aes(x = .fitted, y = .resid)) +
   geom_point(alpha = 0.4, color = "blue") +
   geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
@@ -285,8 +293,6 @@ ggplot(model_augmented, aes(x = .fitted, y = .resid)) +
   theme_minimal()
 
 # --- Plot 2: Normal Q-Q Plot ---
-# This plot checks if the residuals are normally distributed.
-# The points should fall closely along the diagonal dashed line.
 ggplot(model_augmented, aes(sample = .resid)) +
   stat_qq(alpha = 0.4) +
   stat_qq_line(color = "red") +
@@ -304,7 +310,7 @@ ggplot(model_augmented, aes(sample = .resid)) +
 
 ## Conclusion
 
-In this analysis, we successfully identified key drivers of NYC taxi fares. **Trip distance** is overwhelmingly the most important predictor, explaining the vast majority of fare variation. We improved upon a simple model by incorporating additional features like payment method and time of day, creating a multiple regression model that explains **90.7%** of the variance in the total fare (based on the Adjusted R-squared). The exploratory analysis and modeling confirm strong, predictable patterns in the data, providing a solid foundation for fare prediction. Future work could explore interaction terms and variable transformations to capture more complex relationships in the data.
+In this analysis, we were able to identify the key factors that influence the cost of a taxi ride in New York City. **Trip Distance** is the most important factor, explaining the vast majority of differences in fare costs. We refined a simple model by adding additional characteristics such as payment method and time of day, and created a multiple regression model that explains **90.7%** of the variation in total fare (based on adjusted R-squared). Experimental analysis and modeling confirm the presence of clear, predictable patterns in the data, providing a solid basis for predicting fare costs. In the future, interaction terms and variable transformations can be explored to reveal more complex relationships in the data.
 
 ---
 
@@ -348,10 +354,10 @@ The final multiple regression model performed well, explaining approximately 90.
 ### Challenges Encountered
 A significant challenge was the sheer size of the dataset (over 3 million initial records), which made direct visualization and model diagnostics computationally intensive. To overcome this, I used sampling for creating scatter plots and diagnostic plots, which provided clear insights without crashing the R session. Another challenge was interpreting the model's limitations, particularly the violation of the normality assumption for residuals, which required careful consideration of potential next steps like data transformations.
 
-### Question for Peer Feedback
-Given the clear right-skew in the target variable `total_amount` and the patterns observed in the "Residuals vs. Fitted" plot, would applying a log transformation to `total_amount` be the most justified next step to improve model fit and better satisfy the assumptions of linear regression?
+### Questions for feedback from colleagues
+Given the apparent right-skewed distribution of the target variable `total_amount` and the patterns observed in the “Residuals vs. Fit” graph, would applying a logarithmic transformation to `total_amount` be the most appropriate next step to improve model fit and better satisfy the assumptions of linear regression?
 
-### Exam-Style Question and Answer
-**Question:** Explain why the coefficient for `payment_type = 2` (Cash) is negative and statistically significant in the multiple regression model.
+### Exam-style question and answer
+**Question:** Explain why the coefficient for `payment_type = 2` (cash) is negative and statistically significant in the multiple regression model.
 
-**Answer:** The negative coefficient for cash payments indicates that, holding trip distance and other factors constant, trips paid with cash are associated with a significantly lower `total_amount`. This is not because the fare itself is cheaper, but is most likely a data collection artifact. Credit card tips are electronically recorded and included in the `total_amount`, whereas cash tips are given directly to the driver and are often not entered into the meter system, thus remaining unrecorded in the dataset.
+**Answer:** The negative coefficient for cash payments indicates that, holding constant for trip distance and other trip factors, cash payments are associated with a significantly lower `total_amount`. This is not because the fare itself is cheaper, but rather due to data collection characteristics. Tips paid by credit card are recorded electronically and included in `total_amount`, while tips paid in cash are given directly to the driver and are often not entered into the meter system, so they remain unrecorded in the dataset.

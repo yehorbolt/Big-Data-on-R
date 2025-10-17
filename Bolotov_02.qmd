@@ -1,0 +1,178 @@
+---
+title: "Big Data - Practice 02"
+author: "yehorbolt"
+format:
+  pdf:
+    toc: true         
+    number-sections: false
+    geometry: margin=2.5cm
+    fontsize: 12pt
+    linestretch: 1.3   
+    mainfont: "Georgia"
+    colorlinks: true  
+    linkcolor: blue
+    urlcolor: teal
+    citecolor: magenta
+editor: visual
+---
+
+{{< pagebreak >}}
+
+---
+
+## 1. Load and Prepare Data
+
+First, we load the required libraries, read the data, and perform initial cleaning.
+
+```{r setup-and-load, warning=FALSE, echo=TRUE}
+# Libraries
+library(arrow)
+library(dplyr)
+library(ggplot2)
+library(broom) 
+
+# Load the cleaned dataset from Practice 01
+taxi_clean <- read_parquet("Data/taxi_clean_data.parquet")
+```
+
+### Show our cleaned and transformed data
+```{r show, warning=FALSE, echo=TRUE}
+glimpse(taxi_clean)
+```
+
+---
+
+## 2. Baseline Multiple Regression Model
+
+Our first step is to build a linear model using at least five predictors to predict `total_amount`. Based on our preliminary EDA, we will use the following predictors: `trip_distance`, `passenger_count`, `payment_type`, `pickup_hour`, and `day_of_week`. We will also include `VendorID` to see if it has any impact.
+
+```{r baseline-model, warning=FALSE, echo=TRUE}
+# Fit the initial multiple linear regression model
+baseline_model <- lm(total_amount ~ trip_distance + passenger_count + 
+payment_type + pickup_hour + day_of_week + VendorID, 
+                     data = taxi_clean)
+
+# Print the model summary
+summary(baseline_model)
+```
+
+### Interpretation of the base model
+
+The initial model demonstrates high predictive power.
+
+* **Coefficients:** The model provides logical and statistically significant estimates. The coefficient for `trip_distance` is approximately **4.85**, which means that each additional mile is associated with an increase in the total fare of **$4.85**, assuming all other factors remain constant. The negative coefficients for `payment_type2` (cash) and certain levels of `day_of_week` (e.g., Sunday) show how they compare to the base categories (credit card and Monday, respectively).
+
+* **Adjusted R-squared:** The model has an `adjusted R-squared` of **0.9093**. This is a very strong result, indicating that our chosen predictors explain approximately **90.9%** of the variance in `total_amount`.
+
+### Diagnosis of the base model
+
+Despite the high R-squared, we must check whether the model meets the assumptions of linear regression.
+
+```{r diagnostics-baseline,  warning=FALSE, echo=TRUE}
+set.seed(123)
+diagnostics_sample <- taxi_clean %>% slice_sample(n = 10000)
+model_for_plotting <- lm(total_amount ~ trip_distance + passenger_count 
++ payment_type + pickup_hour + day_of_week + VendorID, 
+                         data = diagnostics_sample)
+model_augmented <- augment(model_for_plotting)
+
+# Plot 1: Residuals vs. Fitted
+ggplot(model_augmented, aes(x = .fitted, y = .resid)) +
+  geom_point(alpha = 0.4, color = "blue") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Baseline Model: Residuals vs. Fitted Values",
+    x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+# Plot 2: Normal Q-Q Plot
+ggplot(model_augmented, aes(sample = .resid)) +
+  stat_qq(alpha = 0.4) +
+  stat_qq_line(color = "red") +
+  labs(title = "Baseline Model: Normal Q-Q Plot of Residuals",
+    x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal()
+```
+
+**Diagnostic conclusions:** Diagnostic graphs reveal significant problems.
+
+1.  **Nonlinearity and heteroscedasticity:** The “Residuals vs. Fitted Values” graph shows a clear curve, and the variance (vertical spread) of the residuals increases as the predicted value increases. This violates the basic assumptions of linearity and constant variance. 
+
+2.  **Abnormal residuals:** The “Normal Q-Q plot” shows that the points deviate significantly from the diagonal line, especially at the ends, indicating that the residuals are not normally distributed. 
+
+
+---
+
+## 3. Model Improvement with Transformations
+
+Our diagnostics clearly show that the base model has shortcomings. The most common and effective way to fix these problems is to apply a **logarithmic transformation** to asymmetric variables, namely our predictor `trip_distance` and our target variable `total_amount`. This can help linearize the relationship and stabilize the variance.
+
+Now we will build an improved model with this “logarithmic” transformation.
+
+```{r improved-model, , warning=FALSE, echo=TRUE}
+# Fit the improved model using log transformations
+improved_model <- lm(log(total_amount) ~ log(trip_distance) + 
+passenger_count + payment_type + 
+pickup_hour + day_of_week + VendorID, 
+                     data = taxi_clean)
+
+summary(improved_model)
+```
+
+### Re-evaluating the Improved Model
+
+Let's check the diagnostic plots for our new log-transformed model.
+
+```{r diagnostics-improved, warning=FALSE, echo=TRUE}
+set.seed(123)
+diagnostics_sample_log <- taxi_clean %>% slice_sample(n = 10000)
+model_log_plotting <- lm(log(total_amount) ~ log(trip_distance) 
++ passenger_count + payment_type + pickup_hour 
++ day_of_week + VendorID,  data = diagnostics_sample_log)
+model_log_augmented <- augment(model_log_plotting)
+
+# Plot 1: Residuals vs. Fitted for Improved Model
+ggplot(model_log_augmented, aes(x = .fitted, y = .resid)) +
+  geom_point(alpha = 0.4, color = "darkgreen") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Improved Model: Residuals vs. Fitted Values", 
+   x = "Fitted Values (Log Scale)", y = "Residuals") +
+  theme_minimal()
+
+# Plot 2: Normal Q-Q Plot for Improved Model
+ggplot(model_log_augmented, aes(sample = .resid)) +
+  stat_qq(alpha = 0.4) +
+  stat_qq_line(color = "red") +
+  labs(title = "Improved Model: Normal Q-Q Plot of Residuals", 
+   x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal()
+```
+
+---
+
+## Conclusion
+
+The primary goal of this analysis was to develop a statistically robust linear regression model for predicting the total cost of taxi rides in New York City. The process began by building a baseline multiple linear regression model using the six key predictors identified in the previous exploratory analysis: `trip_distance`, `passenger_count`, `payment_type`, `pickup_hour`, `day_of_week`, and `Vendor_ID`. This initial model, while showing high superficial accuracy, was then subjected to a thorough diagnostic evaluation to verify its compliance with the basic assumptions of linear regression.
+
+This diagnostic step was critical because it revealed significant flaws in the baseline model. The residuals (model errors) were not randomly distributed and exhibited clear patterns of nonlinearity and heteroscedasticity (non-constant variance). A model refinement step was performed to address these flaws. Recognizing that these problems often arise from asymmetrical variables, a logarithmic transformation was applied to both the dependent variable (`total_amount`) and the primary independent variable (`trip_distance`). This ``logarithmic'' transformation created a second, improved model, which was then re-estimated using the same diagnostic tests to confirm its statistical validity.
+
+### Key Results and Interpretation
+
+The final, improved model was both efficient and statistically robust. It achieved an adjusted coefficient of determination (R-squared) of **0.8571**, indicating that the model explained approximately 85.7% of the variance in *log-transformed* total travel cost. All predictors included in the model were highly statistically significant, with p-values ​​virtually equal to zero, confirming their relevance for predicting travel cost.
+
+Interpretation of the model coefficients provided valuable insights. The most significant predictor was `log(trip_distance)`, with a coefficient of approximately **0.498**. In the log-scale model, this is interpreted as an elasticity: **a 1% increase in travel distance is associated with a 0.498% increase in total travel cost, holding other factors constant. This demonstrates a strong but somewhat inelastic relationship. Other predictors also offered clear interpretations; for example, paying with cash (`payment_type = 2`) was associated with significantly lower fares compared to paying with a credit card, likely because cash tips are not included in the `total_amount` data field.
+
+### Challenges encountered
+
+The most significant challenge in this analysis was not technical but analytical. The baseline model yielded a strikingly high adjusted coefficient of determination (CD) of almost 91%, a result that could easily be taken for a complete success. The real challenge was resisting the temptation to stop there and instead proceed with a thorough diagnostic check. This process revealed fundamental flaws in the model, highlighting the critical danger of relying on a single performance measure. The main challenge, therefore, was to recognize that the initial model was unreliable, despite its high predictive power. Overcoming this involved correctly interpreting the diagnostic plots and applying appropriate data transformation to construct a final model that was not only accurate but also robust and statistically significant.
+
+### Questions for peer feedback
+
+The diagnostic plots for the final, log-transformed model show a significant improvement over the baseline. However, the Residuals vs. Fits plot is still not perfectly random; there is a very slight curve, suggesting that some minor nonlinearity may still exist. While the logarithmic transformation was clearly effective, would a more complex transformation, such as adding a polynomial term to `log(trip_distance)` (e.g. `poly(log(trip_distance), 2)`), be a justified next step to capture this residual pattern, or would it introduce unnecessary complexity and risk overfitting the model?
+
+### Exam-Style Questions and Answers
+
+**Question:** An analyst notices that his linear regression model has a high coefficient of determination (R-squared), but the Residuals vs. Fits plot shows a clear funnel shape, with the spread of the residuals increasing as the fits increase. Briefly explain why this model is problematic, and suggest one common method for correcting it.
+
+**Answer:** This model is problematic because the funnel plot indicates heteroscedasticity, a violation of a fundamental assumption of linear regression. This means that the standard errors of the coefficients are unreliable, and therefore hypothesis tests (e.g., p-values) may be incorrect, leading to erroneous conclusions about the significance of the predictors. A common and effective method for correcting this problem is to apply a variance-stabilizing transformation, such as logarithmizing the asymmetric dependent variable. This can compress the scale of the variable and make the variance of the residuals more constant across all fitted values.
+
+
