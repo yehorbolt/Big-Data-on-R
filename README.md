@@ -21,9 +21,9 @@ In these practical assignments, you will find examples of the following techniqu
 ## 📂 Repository Structure
 
 * **/Data**: A directory for storing the source datasets.
-* **/Practice_01**: A directory containing the first practical assignment (NYC Taxi Trip Analysis).
-    * `Practice_01.qmd`: The Quarto file with all the code, analysis, and visualizations.
-    * `Practice_01.pdf`: The final report in PDF format.
+* **/Reports**: A directory containing practical assignments formatted as Quarto documents.
+* **Practice01.qmd**: The first practical assignment focused on predicting NYC taxi fare amounts.
+* **Practice02.qmd**: The second practical assignment (to be added).
 * `README.md`: This file, which describes the repository.
 
 ---
@@ -46,5 +46,10 @@ In these practical assignments, you will find examples of the following techniqu
 
 ### Practice Assignment 01: Predicting NYC Taxi Fare Amount
 
-* **Description**: This assignment involves analyzing a dataset of NYC Yellow Taxi trips from January 2025. The primary objective is to build a linear regression model to predict the total fare (`total_amount`) of a trip.
+* **Description**: This assignment involves analyzing a dataset of NYC Yellow Taxi trips from January 2025. The primary objective is to build a linear regression model to predict the total fare (`total_amount`) of a trip. 
 * **Key Findings**: The analysis confirmed that **trip distance** is the most crucial predictor of the fare. The final model, which also accounts for factors like passenger count, payment method, and time of day, successfully explains approximately **90.7%** of the variance in the total trip cost.
+
+### Practice Assignment 02: Model Diagnostics and Improvement
+
+* **Description**: This assignment builds directly on the first. It focuses on the critical process of model validation. The baseline model from Practice 01 is subjected to a rigorous diagnostic analysis, which reveals violations of key linear regression assumptions (e.g., non-linearity and heteroscedasticity). The model is then improved by applying a log-log transformation to the skewed variables. 
+* **Key Findings**: The analysis demonstrated that a high R-squared is not enough to guarantee a good model. By applying a **log-log transformation**, a new model was created that better satisfies the assumptions of linear regression, making it more statistically robust and reliable. This improved model explains **85.7%** of the variance in the log-transformed total fare and provides a more accurate understanding of the relationships between the predictors and the taxi fare.
