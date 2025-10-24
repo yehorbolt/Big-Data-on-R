@@ -1,0 +1,244 @@
+---
+title: "Big Data - Practice 03"
+author: "yehorbolt"
+format:
+  pdf:
+    toc: true         
+    number-sections: false
+    geometry: margin=2.5cm
+    fontsize: 12pt
+    linestretch: 1.3   
+    mainfont: "Georgia"
+    colorlinks: true  
+    linkcolor: blue
+    urlcolor: teal
+    citecolor: magenta
+editor: visual
+---
+
+{{< pagebreak >}}
+
+------------------------------------------------------------------------
+
+## 1. Introduction and Setup
+
+This analysis refines the log-log regression model developed previously. The goal is to improve model stability and statistical validity using advanced techniques, including model selection based on the **Bayesian Information Criterion (BIC)**, in-depth diagnostics, and Principal Component Analysis (PCA) to address multicollinearity.
+
+```{r setup-and-load, include=FALSE}
+# Load required libraries
+library(arrow)
+library(dplyr)
+library(ggplot2)
+library(broom)
+library(MASS) # For stepAIC()
+library(car)  # For vif()
+library(knitr) 
+
+# Set the time locale to English for reproducible weekday names
+Sys.setlocale("LC_TIME", "English")
+
+# Load the CLEANED dataset created in our previous work
+taxi_clean <- read_parquet("Data/taxi_clean_data.parquet")
+
+# Create log-transformed variables for modeling
+taxi_model_data <- taxi_clean %>%
+  mutate(
+    log_total = log(total_amount),
+    log_distance = log(trip_distance),
+    log_fare = log(fare_amount),
+    log_tip = log(tip_amount + 1), 
+    log_tolls = log(tolls_amount + 1) 
+  )
+```
+
+---
+
+## 2. Initial "Full" Model and Multicollinearity
+
+We start with a "full" model including all potentially relevant predictors to check for multicollinearity.
+
+```{r full-model, echo=FALSE}
+# Fit the initial "full" model
+full_model <- lm(log_total ~ log_distance + log_fare + log_tip + log_tolls + 
+                   passenger_count + payment_type + pickup_hour + day_of_week + VendorID,
+                 data = taxi_model_data)
+
+# Print the VIF scores
+vif_scores <- vif(full_model)
+print(kable(vif_scores, caption="VIF Scores for Full Model"))
+```
+
+**Finding:** The VIF scores for `log_distance` (**~9.89**) and `log_fare` (**~10.26**) confirm significant multicollinearity.
+
+---
+
+## 3. Model Improvement I: Stepwise Selection (BIC)
+
+We use backward stepwise selection based on **BIC**.
+
+```{r stepwise-bic-model, echo=TRUE}
+# Determine n for BIC calculation
+n_obs <- nrow(taxi_model_data)
+
+# Run backward stepwise selection using BIC
+step_model_bic <- stepAIC(full_model, 
+                         direction = "backward", 
+                         trace = FALSE, 
+                         k = log(n_obs)) 
+
+# Show the summary of the model selected by BIC
+summary(step_model_bic)
+```
+
+**Interpretation:** Stepwise selection using BIC removed `VendorID`. The resulting `step_model_bic` is simpler but **still retains both `log_distance` and `log_fare`**, meaning multicollinearity persists.
+
+---
+
+## 4. Advanced Diagnostics on the BIC-Selected Model
+
+Diagnostics are run on a sample for efficiency.
+
+```{r advanced-diagnostics-bic, echo=TRUE, message=FALSE, warning=FALSE, fig.width=10, fig.height=8}
+# Create a sample for fast diagnostics
+set.seed(123)
+diag_sample_bic <- taxi_model_data %>% slice_sample(n = 10000)
+
+# Re-fit the BIC-selected model formula on the sample
+step_model_diag_bic <- lm(formula(step_model_bic), data = diag_sample_bic)
+
+# --- Plot diagnostics ---
+par(mfrow = c(2, 2))
+plot(step_model_diag_bic, which = 1) # Residuals vs Fitted
+plot(step_model_diag_bic, which = 2) # Normal Q-Q
+plot(step_model_diag_bic, which = 4) # Cook's Distance
+plot(step_model_diag_bic, which = 5) # Residuals vs Leverage
+par(mfrow = c(1, 1))
+```
+
+**Diagnostic Interpretation:** The plots are generally reasonable, with no extreme outliers strongly influencing the BIC model after log transformations.
+
+---
+
+## 5. Model Improvement II: Principal Component Analysis (PCA)
+
+PCA is applied to the 4 correlated numeric variables.
+
+```{r pca-model, echo=FALSE}
+# 1. Isolate correlated numeric predictors
+cor_vars <- taxi_model_data %>% dplyr::select(log_distance, log_fare, log_tip, log_tolls)
+
+# 2. Run PCA
+pca_results <- prcomp(cor_vars, scale. = TRUE)
+# summary(pca_results) # PC1~61.7%, PC2~18.9%, PC3~18.0%, PC4~1.3%
+
+# 3. Create PCA dataset
+pca_data <- bind_cols(
+  taxi_model_data %>% dplyr::select(-log_distance, -log_fare, -log_tip, -log_tolls),
+  as.data.frame(pca_results$x)
+)
+
+# 4. Fit PCA model (Full: all 4 PCs + original non-numeric + VendorID)
+pca_model_full <- lm(log_total ~ PC1 + PC2 + PC3 + PC4 + 
+                       passenger_count + payment_type + pickup_hour + day_of_week + VendorID,
+                     data = pca_data)
+
+# 5. Fit PCA model (Reduced: first 3 PCs + original non-numeric, NO VendorID)
+pca_model_reduced <- lm(log_total ~ PC1 + PC2 + PC3 + 
+                          passenger_count + payment_type + pickup_hour + day_of_week,
+                        data = pca_data)                     
+```
+
+**Interpretation:** PCA transforms the correlated variables. PC1 captures ~61.7% of the original numeric variance. We create two PCA models for comparison.
+
+---
+## 6. Final Model Comparison (BIC vs. PCA)
+
+This table compares the final candidate models. The `step_model_bic` is compared against the two PCA variants.
+
+```{r model-comparison-bic, echo=FALSE, message=FALSE, warning=FALSE}
+# This code assumes the model objects `step_model_bic`, `pca_model_full`, 
+# and `pca_model_reduced` exist in the R environment.
+library(knitr)
+
+# --- Function to extract F-statistic p-value ---
+get_f_pvalue <- function(model_summary) {
+  fstat <- model_summary$fstatistic
+  if (is.null(fstat) || length(fstat) < 3) return(NA)
+  pvalue <- pf(fstat[1], fstat[2], fstat[3], lower.tail = FALSE)
+  return(pvalue)
+}
+
+# --- Extract Summaries ---
+summary_bic <- summary(step_model_bic)
+summary_pca_full <- summary(pca_model_full)
+summary_pca_reduced <- summary(pca_model_reduced)
+
+# --- Create Expanded Data Frame ---
+model_stats_f <- data.frame(
+  Model = c("Stepwise (BIC)", "PCA (Full)", "PCA (Reduced)"),
+  Num_Predictors = c(
+    length(coef(step_model_bic)) - 1, 
+    length(coef(pca_model_full)) - 1,
+    length(coef(pca_model_reduced)) - 1
+  ),
+  Adj_R_Squared = c(
+    summary_bic$adj.r.squared,
+    summary_pca_full$adj.r.squared,
+    summary_pca_reduced$adj.r.squared
+  ),
+  RSE = c( # Residual Standard Error
+    summary_bic$sigma,
+    summary_pca_full$sigma,
+    summary_pca_reduced$sigma
+  ),
+  F_Statistic = c(
+    summary_bic$fstatistic[1], # Value of F
+    summary_pca_full$fstatistic[1],
+    summary_pca_reduced$fstatistic[1]
+  ),
+  F_p_value_raw = c(
+    get_f_pvalue(summary_bic),
+    get_f_pvalue(summary_pca_full),
+    get_f_pvalue(summary_pca_reduced)     
+  ),
+  AIC = c(AIC(step_model_bic), AIC(pca_model_full), AIC(pca_model_reduced)),
+  BIC = c(BIC(step_model_bic), BIC(pca_model_full), BIC(pca_model_reduced))
+)
+
+# Format p-value nicely
+model_stats_f$F_p_value <- ifelse(model_stats_f$F_p_value_raw < 0.001, "< 0.001", round(model_stats_f$F_p_value_raw, 3))
+model_stats_f$F_p_value_raw <- NULL # Remove the raw column
+
+# Reorder columns for clarity
+model_stats_f <- model_stats_f[, c("Model", "Num_Predictors", "Adj_R_Squared", "RSE", "F_Statistic", "F_p_value", "AIC", "BIC")]
+
+# Print a clean table
+kable(model_stats_f, 
+      caption = "Comparison of Final Models (BIC vs. PCA)", 
+      digits = c(NA, 0, 4, 4, 0, NA, 0, 0), # Specify digits
+      col.names = c("Model", "# Predictors", "Adj. R²", "RSE", "F-statistic", "F p-value", "AIC", "BIC")) 
+```
+
+### Summary of Results and Interpretation
+
+Both the `Stepwise (BIC)` model and the `PCA (Full)` model achieved nearly identical high Adjusted R-squared values (~0.9717) and very similar BIC scores.
+
+However, they differ in usability:
+* **Stepwise (BIC) Model:** Retains original variables, making it *partially* interpretable. But the coefficients for `log_distance` and `log_fare` are unreliable due to high VIFs.
+* **PCA Model:** Successfully eliminates multicollinearity, but its coefficients (e.g., `PC1`) are blends of the original variables, making them difficult to explain in a direct, real-world sense.
+
+The `PCA (Reduced)` model is clearly inferior, with a significantly lower Adj. $R^2$. The choice between the BIC and PCA (Full) models depends on the project goal: predictive accuracy (both are equal) vs. interpretability (both are flawed in different ways).
+
+## 7. Challenges Encountered
+
+The primary challenge was the **strong multicollinearity** between `log_distance` and `log_fare`. This forced a trade-off. Stepwise selection (BIC) prioritized statistical fit over coefficient stability, keeping both correlated variables. PCA resolved the multicollinearity but at the cost of interpretability. A practical challenge was running diagnostics on the full dataset, which was overcome by using a representative random sample for plotting.
+
+## 8. Question for Peer Feedback
+
+Given that the Stepwise (BIC) model retained highly collinear predictors but achieved the best BIC score, while PCA resolved multicollinearity but sacrificed interpretability: **In a scenario where explaining the *individual impact* of distance vs. base fare is important, would it be statistically justifiable to manually remove `log_fare` (even though BIC suggests keeping it) to create a third, more interpretable model, potentially sacrificing a tiny amount of predictive accuracy?**
+
+## 9. Exam-Style Question and Answer
+
+**Question:** An analyst uses backward stepwise regression based on BIC and finds that the final model retains two variables with very high VIF scores (>10). Should the analyst accept this model? Explain why or why not.
+
+**Answer:** The analyst should be cautious about accepting this model, especially if interpreting individual coefficient effects is important. While BIC selected this model as optimal based on balancing fit and complexity (in-sample goodness-of-fit penalized by model size), the high VIF scores mean the coefficients for those two variables are unstable and have inflated standard errors. This makes their individual effects unreliable and potentially misleading, even if the overall model's predictive power is strong.
