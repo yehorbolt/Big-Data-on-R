@@ -51,7 +51,7 @@ taxi_model_data <- taxi_clean %>%
   )
 ```
 
----
+------------------------------------------------------------------------
 
 ## 2. Initial "Full" Model and Multicollinearity
 
@@ -68,9 +68,9 @@ vif_scores <- vif(full_model)
 print(kable(vif_scores, caption="VIF Scores for Full Model"))
 ```
 
-**Finding:** The VIF scores for `log_distance` (**~9.89**) and `log_fare` (**~10.26**) confirm significant multicollinearity.
+**Finding:** The VIF scores for `log_distance` (~**9.89)\ and\ `log_fare`\ (**~10.26) confirm significant multicollinearity.
 
----
+------------------------------------------------------------------------
 
 ## 3. Model Improvement I: Stepwise Selection (BIC)
 
@@ -92,7 +92,7 @@ summary(step_model_bic)
 
 **Interpretation:** Stepwise selection using BIC removed `VendorID`. The resulting `step_model_bic` is simpler but **still retains both `log_distance` and `log_fare`**, meaning multicollinearity persists.
 
----
+------------------------------------------------------------------------
 
 ## 4. Advanced Diagnostics on the BIC-Selected Model
 
@@ -117,7 +117,7 @@ par(mfrow = c(1, 1))
 
 **Diagnostic Interpretation:** The plots are generally reasonable, with no extreme outliers strongly influencing the BIC model after log transformations.
 
----
+------------------------------------------------------------------------
 
 ## 5. Model Improvement II: Principal Component Analysis (PCA)
 
@@ -148,9 +148,10 @@ pca_model_reduced <- lm(log_total ~ PC1 + PC2 + PC3 +
                         data = pca_data)                     
 ```
 
-**Interpretation:** PCA transforms the correlated variables. PC1 captures ~61.7% of the original numeric variance. We create two PCA models for comparison.
+**Interpretation:** PCA transforms the correlated variables. PC1 captures \~61.7% of the original numeric variance. We create two PCA models for comparison.
 
----
+------------------------------------------------------------------------
+
 ## 6. Final Model Comparison (BIC vs. PCA)
 
 This table compares the final candidate models. The `step_model_bic` is compared against the two PCA variants.
@@ -221,11 +222,9 @@ kable(model_stats_f,
 
 ### Summary of Results and Interpretation
 
-Both the `Stepwise (BIC)` model and the `PCA (Full)` model achieved nearly identical high Adjusted R-squared values (~0.9717) and very similar BIC scores.
+Both the `Stepwise (BIC)` model and the `PCA (Full)` model achieved nearly identical high Adjusted R-squared values (\~0.9717) and very similar BIC scores.
 
-However, they differ in usability:
-* **Stepwise (BIC) Model:** Retains original variables, making it *partially* interpretable. But the coefficients for `log_distance` and `log_fare` are unreliable due to high VIFs.
-* **PCA Model:** Successfully eliminates multicollinearity, but its coefficients (e.g., `PC1`) are blends of the original variables, making them difficult to explain in a direct, real-world sense.
+However, they differ in usability: \* **Stepwise (BIC) Model:** Retains original variables, making it *partially* interpretable. But the coefficients for `log_distance` and `log_fare` are unreliable due to high VIFs. \* **PCA Model:** Successfully eliminates multicollinearity, but its coefficients (e.g., `PC1`) are blends of the original variables, making them difficult to explain in a direct, real-world sense.
 
 The `PCA (Reduced)` model is clearly inferior, with a significantly lower Adj. $R^2$. The choice between the BIC and PCA (Full) models depends on the project goal: predictive accuracy (both are equal) vs. interpretability (both are flawed in different ways).
 
@@ -239,6 +238,6 @@ Given that the Stepwise (BIC) model retained highly collinear predictors but ach
 
 ## 9. Exam-Style Question and Answer
 
-**Question:** An analyst uses backward stepwise regression based on BIC and finds that the final model retains two variables with very high VIF scores (>10). Should the analyst accept this model? Explain why or why not.
+**Question:** An analyst uses backward stepwise regression based on BIC and finds that the final model retains two variables with very high VIF scores (\>10). Should the analyst accept this model? Explain why or why not.
 
 **Answer:** The analyst should be cautious about accepting this model, especially if interpreting individual coefficient effects is important. While BIC selected this model as optimal based on balancing fit and complexity (in-sample goodness-of-fit penalized by model size), the high VIF scores mean the coefficients for those two variables are unstable and have inflated standard errors. This makes their individual effects unreliable and potentially misleading, even if the overall model's predictive power is strong.
