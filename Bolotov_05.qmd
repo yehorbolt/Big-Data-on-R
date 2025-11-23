@@ -24,7 +24,7 @@ editor: visual
 
 This analysis extends the log-log regression model developed in **Practice 04**. The previous work identified significant **multicollinearity** between `log_distance` and `log_fare`. This caused the baseline OLS (BIC-selected) model to have **unstable and uninterpretable coefficients** (e.g., a negative effect for distance on cost), rendering it "senseless" for analysis.
 
-In this assignment, we will apply the **shrinkage methods** covered in **Session 5**: **Ridge**, **Lasso**, and **Elastic Net**. 
+In this assignment, we will apply the **shrinkage methods** covered in **Session 5**: **Ridge**, **Lasso**, and **Elastic Net**.
 
 Our goal is to comprehensively compare the "max accuracy" (`lambda.min`) rule versus the "max simplicity" (`lambda.1se`) rule for all three methods, in addition to our baseline OLS model.
 
@@ -54,7 +54,7 @@ taxi_model_data <- taxi_clean %>%
   )
 ```
 
----
+------------------------------------------------------------------------
 
 ## 2. Preprocessing for Regularization
 
@@ -99,7 +99,7 @@ y_train <- train_data$log_total
 y_test  <- test_data$log_total
 ```
 
----
+------------------------------------------------------------------------
 
 ## 3. Baseline Model: OLS (from Practice 04)
 
@@ -123,7 +123,7 @@ ols_metrics <- data.frame(
 kable(ols_metrics, caption="Baseline OLS Model Metrics on Test Data", digits=4)
 ```
 
----
+------------------------------------------------------------------------
 
 ## 4. Regularization Models
 
@@ -297,7 +297,7 @@ kable(enet_metrics_combined,
 caption="Tuned Elastic Net Model Metrics on Test Data", digits=c(NA, 4, 4, 4, 2, 6))
 ```
 
----
+------------------------------------------------------------------------
 
 ## 6. Comparison of Model Performance
 
@@ -325,17 +325,11 @@ kable(final_metrics,
 
 The key finding from Table 5 is that **all 7 models**—the OLS baseline, both Ridge models, both Lasso models, and both tuned Elastic Net models—achieved **practically identical, top-tier predictive accuracy** ($R^2 \approx 0.9717$).
 
-This fundamentally changes our analysis:
-1.  **OLS Model is Robust:** The OLS model was not suffering from overfitting; its performance on the test set is just as high as the regularized models.
-2.  **`lambda.1se` Rule Costs Nothing:** Using the simpler `lambda.1se` rule (instead of `lambda.min`) resulted in **no loss of predictive power** on this dataset.
-3.  **The Choice is Simplicity, Not Accuracy:** Since all models are equally accurate, the choice of the "best" model now depends entirely on interpretability and parsimony.
-
-
+This fundamentally changes our analysis: 1. **OLS Model is Robust:** The OLS model was not suffering from overfitting; its performance on the test set is just as high as the regularized models. 2. **`lambda.1se` Rule Costs Nothing:** Using the simpler `lambda.1se` rule (instead of `lambda.min`) resulted in **no loss of predictive power** on this dataset. 3. **The Choice is Simplicity, Not Accuracy:** Since all models are equally accurate, the choice of the "best" model now depends entirely on interpretability and parsimony.
 
 ## 7. Model Interpretation (Coefficient Comparison)
 
 The real difference lies in **interpretation and simplicity**. Table 6 compares the full OLS model with the two Lasso alternatives.
-
 
 ```{r all-coefficients-comparison, echo=TRUE}
 # Helper function to get coefficients
@@ -392,7 +386,7 @@ kable(comparison_table,
 2.  **Lasso (lambda.min):** This accuracy-focused model is **almost identical to OLS**. It also uses **all 14 predictors** and only shrinks their coefficients trivially. This confirms that with a very small `lambda` (`0.00001`), Lasso converges to the OLS solution.
 3.  **Lasso (lambda.1se) (The Key Insight):** This model provides the **best solution**. It achieves the *same* predictive accuracy ($R^2 = 0.9717$) but is significantly **simpler**. It has **zeroed out 5 predictors**: `passenger_count`, `day_of_weekWednesday`, `day_of_weekThursday`, `day_of_weekFriday`, and `VendorID`.
 
----
+------------------------------------------------------------------------
 
 ### 8. The Best Model
 
@@ -414,5 +408,4 @@ Here is the reasoning:
 
 **Question:** An analyst has a high-dimensional dataset ($p > n$) and suspects many of the predictors are irrelevant to $Y$. Which regularization method (Ridge or Lasso) is better suited for variable selection, and why?
 
-**Answer:**
-**Lasso** (`alpha = 1`) should be chosen. Lasso uses an L1 penalty ($\lambda \sum |\beta_j|$), which, due to its "diamond-shaped" constraint region, can force coefficient estimates to be **exactly zero**. This effectively performs automatic variable selection. In contrast, Ridge (`alpha = 0`) uses an L2 penalty ($\lambda \sum \beta_j^2$), which only shrinks coefficients *towards* zero but never makes them exactly zero, thus keeping all predictors in the final model.
+**Answer:** **Lasso** (`alpha = 1`) should be chosen. Lasso uses an L1 penalty ($\lambda \sum |\beta_j|$), which, due to its "diamond-shaped" constraint region, can force coefficient estimates to be **exactly zero**. This effectively performs automatic variable selection. In contrast, Ridge (`alpha = 0`) uses an L2 penalty ($\lambda \sum \beta_j^2$), which only shrinks coefficients *towards* zero but never makes them exactly zero, thus keeping all predictors in the final model.

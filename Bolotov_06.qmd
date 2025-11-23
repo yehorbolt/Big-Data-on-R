@@ -1,0 +1,539 @@
+---
+title: "Big Data - Practice 06"
+author: "yehorbolt"
+format:
+  pdf:
+    toc: true         
+    number-sections: false
+    geometry: margin=2.5cm
+    fontsize: 12pt
+    linestretch: 1.3   
+    mainfont: "Georgia"
+    colorlinks: true  
+    linkcolor: blue
+    urlcolor: teal
+    citecolor: magenta
+editor: visual
+---
+
+{{< pagebreak >}}
+
+------------------------------------------------------------------------
+
+## 1. Introduction
+
+In this practice, we extend our analysis of the NYC Taxi dataset by applying **Generalized Linear Models (GLMs)**. Previous analyses relied on Ordinary Least Squares (OLS) regression, often requiring log-transformations of the response variable to satisfy normality assumptions. GLMs allow us to model the response variable directly using appropriate distribution families and link functions.
+
+We will perform two key analyses: 1. **Modeling Total Trip Cost**: Using a **Gamma GLM** to predict `total_amount`, accounting for the right-skewed, positive nature of cost data. 2. **Predicting Tipping Behavior**: Using a **Binomial GLM** (Logistic Regression) to predict the binary outcome `tip_got` (whether a passenger tipped or not).
+
+## 2. Data Preparation
+
+We use the cleaned taxi dataset from previous sessions.
+
+```{r setup-and-load, include=FALSE}
+# Load required libraries
+library(arrow)
+library(dplyr)
+library(ggplot2)
+library(broom)
+library(knitr) 
+library(caret)      
+library(glmnet)     
+library(Metrics)    
+library(purrr)    
+library(pROC) 
+
+Sys.setlocale("LC_TIME", "English")
+
+# Global Theme for Prettier Plots
+theme_set(theme_minimal(base_size = 12) +
+            theme(plot.title = element_text(face = "bold", hjust = 0.5),
+                  plot.subtitle = element_text(hjust = 0.5, color = "gray50")))
+
+# Load data
+taxi_clean <- read_parquet("Data/taxi_clean_data.parquet")
+
+# Preprocessing
+taxi_model_data <- taxi_clean %>%
+  mutate(
+    tip_got = ifelse(tip_amount > 0, 1, 0),
+    log_total = log(total_amount),
+    log_distance = log(trip_distance),
+    log_fare = log(fare_amount),
+    log_tip = log(tip_amount + 1), 
+    log_tolls = log(tolls_amount + 1) 
+  )
+
+# Ensure categorical variables are factors
+taxi_model_data$payment_type <- as.factor(taxi_model_data$payment_type)
+taxi_model_data$day_of_week <- as.factor(taxi_model_data$day_of_week)
+taxi_model_data$VendorID <- as.factor(taxi_model_data$VendorID)
+```
+
+### 2.1. Train/Test Split
+
+We split the data into 80% training and 20% testing sets.
+
+```{r train-test-split, echo=TRUE}
+set.seed(123)
+train_index <- createDataPartition(taxi_model_data$total_amount, 
+                                   p = 0.8, list = FALSE)
+train_data <- taxi_model_data[train_index, ]
+test_data  <- taxi_model_data[-train_index, ]
+```
+
+------------------------------------------------------------------------
+
+## 3. Analysis 1: Modeling Total Trip Cost (Gamma GLM)
+
+### 3.1. Model Specification
+
+For predicting `total_amount`, we choose a **Gamma distribution** with a **log link function**. \* **Family: Gamma**: The response variable `total_amount` is continuous, strictly positive, and right-skewed. The Gamma distribution is ideal for such data (e.g., costs, wait times) as it handles the variance increasing with the mean. \* **Link: Log**: This ensures that predicted values are always positive and allows for multiplicative interpretation of coefficients.
+
+### 3.2. Fitting the Model
+
+```{r gamma-glm, echo=TRUE, warning=FALSE}
+# Fit Gamma GLM
+gamma_model <- glm(total_amount ~ log_distance + log_fare + log_tolls + 
+                     passenger_count + payment_type + pickup_hour + 
+                     day_of_week + VendorID, 
+                   family = Gamma(link = "log"), 
+                   data = train_data)
+
+summary(gamma_model)
+```
+
+### 3.3. Visualizing the Fit (PDF)
+
+To visualize how well the Gamma distribution fits the data, we compare the observed density of `total_amount` with the predicted density.
+
+```{r gamma-plot, echo=TRUE, fig.height=4, fig.width=6, dev='png', dpi=300, warning=FALSE}
+# Predict mean values on training data
+mu_hat <- predict(gamma_model, type = "response")
+
+# Estimate Shape parameter (approximate)
+shape_est <- 1 / summary(gamma_model)$dispersion
+
+# Sample data for plotting (Optimization for large dataset)
+plot_data_hist <- train_data %>% sample_n(min(50000, nrow(train_data)))
+
+# Plot
+ggplot(plot_data_hist, aes(x = total_amount)) +
+  geom_histogram(aes(y = ..density..), 
+                 bins = 50, fill = "skyblue", alpha = 0.6) +
+  stat_function(fun = dgamma, args = list(shape = shape_est, 
+                                          rate = shape_est / mean(mu_hat)), 
+                color = "darkred", size = 1.2) +
+  labs(title = "Gamma Fit: Observed vs. Theoretical PDF",
+       subtitle = "Histogram of Total Amount (Sampled) with overlaid Gamma Density",
+       x = "Total Amount ($)", y = "Density") +
+  xlim(0, 100) # Limit x-axis to focus on the main distribution
+```
+
+### 3.4. Diagnostic Check: Pearson Residuals
+
+Unlike OLS, where we expect constant variance (homoscedasticity), Gamma GLMs assume that variance increases with the mean To verify the model fit, we plot the **Pearson Residuals** against the fitted values.
+
+```{r gamma-residuals, echo=TRUE, fig.height=4, fig.width=6, dev='png', dpi=300}
+# Calculate Pearson Residuals
+residuals_pearson <- residuals(gamma_model, type = "pearson")
+fitted_values <- fitted(gamma_model)
+
+# Create a dataframe and sample for plotting to reduce file size
+plot_data_gamma <- data.frame(Fitted = fitted_values, 
+                              Residuals = residuals_pearson) %>%
+  sample_n(5000) # Sample 5000 points for a lightweight plot
+
+# Plot
+ggplot(plot_data_gamma, aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.3, color = "darkblue") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Pearson Residuals vs. Fitted Values",
+       subtitle = "Diagnostic for Gamma GLM (Sampled)",
+       x = "Fitted Values (Total Amount)", y = "Pearson Residuals") +
+  theme_minimal()
+```
+
+**Diagnostic Interpretation:** The plot above displays the Pearson residuals plotted against the fitted values from our Gamma GLM. As we can observe, the residuals are randomly scattered around the horizontal zero line, exhibiting no discernible pattern or systematic trend. This random dispersion suggests that the model has successfully captured the underlying structure of the data. Crucially, the lack of any 'fanning' or curvature indicates that the variance has been effectively stabilized, validating our choice of the Gamma distribution with a log link function to model the heteroscedastic nature of the trip cost data.
+
+### 3.5. Comparison with OLS
+
+We compare the Gamma GLM with the baseline OLS model (log-log) from previous practices. To make a fair comparison, we predict on the test set and calculate RMSE and MAE on the **original scale** (dollars).
+
+```{r comparison-cost, echo=TRUE}
+# 1. Gamma GLM Predictions (Response scale)
+gamma_pred <- predict(gamma_model, newdata = test_data, type = "response")
+
+# 2. OLS Model (Log-Log)
+ols_model <- lm(log_total ~ log_distance + log_fare + log_tolls + 
+                  passenger_count + payment_type + pickup_hour + 
+                  day_of_week + VendorID, 
+                data = train_data)
+
+# Predict log_total and exponentiate to get back to dollars
+ols_pred_log <- predict(ols_model, newdata = test_data)
+ols_pred <- exp(ols_pred_log)
+
+# Metrics Comparison
+cost_metrics <- data.frame(
+  Model = c("Gamma GLM (Log Link)", "OLS (Log-Transformed)"),
+  RMSE = c(rmse(test_data$total_amount, gamma_pred), 
+           rmse(test_data$total_amount, ols_pred)),
+  MAE = c(mae(test_data$total_amount, gamma_pred), 
+          mae(test_data$total_amount, ols_pred))
+)
+
+kable(cost_metrics, caption = "Performance Comparison: Gamma GLM vs OLS")
+```
+
+**Interpretation:** The Gamma GLM provides a theoretically sounder approach for cost data. If the RMSE/MAE are similar or better, the Gamma model is preferred because it directly models the mean-variance relationship inherent in cost data without requiring transformation of the response variable (and the subsequent bias correction issues when back-transforming).
+
+------------------------------------------------------------------------
+
+## 4. Analysis 2: Predicting Tipping Behavior (Binomial GLM)
+
+### 4.1. Model Specification
+
+We want to predict `tip_got` (1 if tip \> 0, 0 otherwise).
+
+**Theoretical Justification:** Ordinary Least Squares (OLS) regression is mathematically invalid for this binary response variable for two key reasons: 1. **Boundedness**: OLS predictions can fall outside the $[0,1]$ interval, which is nonsensical for probabilities. 2. **Non-Normality**: The error terms for a binary outcome follow a Bernoulli distribution, not a Normal distribution. This violates the homoscedasticity assumption of OLS.
+
+Therefore, we use a **Binomial GLM** with a **Logit Link Function**.
+
+**Data Subset**: We restrict this analysis to **Credit Card trips** (`payment_type == 1`). Cash tips are rarely recorded in the system (creating a mechanical correlation), so excluding them allows us to model actual *tipping behavior* among passengers who have the option to tip on the record.
+
+### 4.2. Fitting the Model
+
+We filter the training and test sets for Credit Card trips and remove `payment_type` from the predictors (as it is now constant).
+
+```{r binomial-glm, echo=TRUE}
+# Filter for Credit Card trips only
+train_data_cc <- train_data %>% filter(payment_type == 1)
+test_data_cc  <- test_data %>% filter(payment_type == 1)
+
+# Fit Binomial GLM (excluding payment_type)
+binomial_model <- glm(tip_got ~ trip_distance + fare_amount + tolls_amount + 
+                        passenger_count + pickup_hour + 
+                        day_of_week + VendorID, 
+                      family = binomial(link = "logit"), 
+                      data = train_data_cc)
+
+summary(binomial_model)
+```
+
+### 4.3. Model Performance
+
+The dataset is highly imbalanced (most passengers tip). A standard threshold of 0.5 would classify almost everyone as a "Tipper", failing to identify the minority class ("No Tip"). To address this, we adjust the classification threshold to the **proportion of positives in the training set**.
+
+```{r binomial-eval, echo=TRUE}
+# 1. Determine Balanced Threshold
+threshold <- mean(train_data_cc$tip_got)
+cat("Balanced Threshold (Training Proportion):", round(threshold, 4), "\n")
+
+# 2. Predict probabilities
+prob_tip <- predict(binomial_model, newdata = test_data_cc, type = "response")
+
+# 3. Convert to class labels using the balanced threshold
+pred_tip <- ifelse(prob_tip > threshold, 1, 0)
+
+# 4. Evaluation with Sensitivity and Specificity
+conf_matrix <- confusionMatrix(as.factor(pred_tip), as.factor(test_data_cc$tip_got), positive = "1")
+library(pROC) 
+
+Sys.setlocale("LC_TIME", "English")
+
+# Global Theme for Prettier Plots
+theme_set(theme_minimal(base_size = 12) +
+            theme(plot.title = element_text(face = "bold", hjust = 0.5),
+                  plot.subtitle = element_text(hjust = 0.5, color = "gray50")))
+```
+
+### 2.1. Train/Test Split
+
+We split the data into 80% training and 20% testing sets.
+
+```{r train-test-split-2, echo=TRUE}
+set.seed(123)
+train_index <- createDataPartition(taxi_model_data$total_amount, p = 0.8, 
+                                   list = FALSE)
+train_data <- taxi_model_data[train_index, ]
+test_data  <- taxi_model_data[-train_index, ]
+```
+
+------------------------------------------------------------------------
+
+## 3. Analysis 1: Modeling Total Trip Cost (Gamma GLM)
+
+### 3.1. Model Specification
+
+For predicting `total_amount`, we choose a **Gamma distribution** with a **log link function**. \* **Family: Gamma**: The response variable `total_amount` is continuous, strictly positive, and right-skewed. The Gamma distribution is ideal for such data (e.g., costs, wait times) as it handles the variance increasing with the mean. \* **Link: Log**: This ensures that predicted values are always positive and allows for multiplicative interpretation of coefficients.
+
+### 3.2. Fitting the Model
+
+```{r gamma-glm-2, echo=TRUE}
+# Fit Gamma GLM
+gamma_model <- glm(total_amount ~ log_distance + log_fare + log_tolls + 
+                     passenger_count + payment_type + pickup_hour + 
+                     day_of_week + VendorID, 
+                   family = Gamma(link = "log"), 
+                   data = train_data)
+
+summary(gamma_model)
+```
+
+### 3.3. Visualizing the Fit (PDF)
+
+To visualize how well the Gamma distribution fits the data, we compare the observed density of `total_amount` with the predicted density.
+
+```{r gamma-plot-2, echo=TRUE, fig.height=4, fig.width=6, dev='png', dpi=300, warning=FALSE}
+# Predict mean values on training data
+mu_hat <- predict(gamma_model, type = "response")
+
+# Estimate Shape parameter (approximate)
+shape_est <- 1 / summary(gamma_model)$dispersion
+
+# Sample data for plotting (Optimization for large dataset)
+plot_data_hist <- train_data %>% sample_n(min(50000, nrow(train_data)))
+
+# Plot
+ggplot(plot_data_hist, aes(x = total_amount)) +
+  geom_histogram(aes(y = ..density..), bins = 50, 
+                 fill = "skyblue", alpha = 0.6) +
+  stat_function(fun = dgamma, 
+                args = list(shape = shape_est, rate = shape_est / mean(mu_hat)), 
+                color = "darkred", size = 1.2) +
+  labs(title = "Gamma Fit: Observed vs. Theoretical PDF",
+       subtitle = "Histogram of Total Amount (Sampled) with overlaid Gamma Density",
+       x = "Total Amount ($)", y = "Density") +
+  xlim(0, 100) # Limit x-axis to focus on the main distribution
+```
+
+### 3.4. Diagnostic Check: Pearson Residuals
+
+Unlike OLS, where we expect constant variance (homoscedasticity), Gamma GLMs assume that variance increases with the mean To verify the model fit, we plot the **Pearson Residuals** against the fitted values.
+
+```{r gamma-residuals-2, echo=TRUE, fig.height=4, fig.width=6, dev='png', dpi=300}
+# Calculate Pearson Residuals
+residuals_pearson <- residuals(gamma_model, type = "pearson")
+fitted_values <- fitted(gamma_model)
+
+# Create a dataframe and sample for plotting to reduce file size
+plot_data_gamma <- data.frame(Fitted = fitted_values, 
+                              Residuals = residuals_pearson) %>%
+  sample_n(5000) # Sample 5000 points for a lightweight plot
+
+# Plot
+ggplot(plot_data_gamma, aes(x = Fitted, y = Residuals)) +
+  geom_point(alpha = 0.3, color = "darkblue") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Pearson Residuals vs. Fitted Values",
+       subtitle = "Diagnostic for Gamma GLM (Sampled)",
+       x = "Fitted Values (Total Amount)", y = "Pearson Residuals") +
+  theme_minimal()
+```
+
+**Diagnostic Interpretation:** The plot above displays the Pearson residuals plotted against the fitted values from our Gamma GLM. As we can observe, the residuals are randomly scattered around the horizontal zero line, exhibiting no discernible pattern or systematic trend. This random dispersion suggests that the model has successfully captured the underlying structure of the data. Crucially, the lack of any 'fanning' or curvature indicates that the variance has been effectively stabilized, validating our choice of the Gamma distribution with a log link function to model the heteroscedastic nature of the trip cost data.
+
+### 3.5. Comparison with OLS
+
+We compare the Gamma GLM with the baseline OLS model (log-log) from previous practices. To make a fair comparison, we predict on the test set and calculate RMSE and MAE on the **original scale** (dollars).
+
+```{r comparison-cost-2, echo=TRUE}
+# 1. Gamma GLM Predictions (Response scale)
+gamma_pred <- predict(gamma_model, newdata = test_data, type = "response")
+
+# 2. OLS Model (Log-Log)
+ols_model <- lm(log_total ~ log_distance + log_fare + log_tolls + 
+                  passenger_count + payment_type + pickup_hour + 
+                  day_of_week + VendorID, 
+                data = train_data)
+
+# Predict log_total and exponentiate to get back to dollars
+ols_pred_log <- predict(ols_model, newdata = test_data)
+ols_pred <- exp(ols_pred_log)
+
+# Metrics Comparison
+cost_metrics <- data.frame(
+  Model = c("Gamma GLM (Log Link)", "OLS (Log-Transformed)"),
+  RMSE = c(rmse(test_data$total_amount, gamma_pred), 
+           rmse(test_data$total_amount, ols_pred)),
+  MAE = c(mae(test_data$total_amount, gamma_pred), 
+          mae(test_data$total_amount, ols_pred))
+)
+
+kable(cost_metrics, caption = "Performance Comparison: Gamma GLM vs OLS")
+```
+
+**Interpretation:** The Gamma GLM provides a theoretically sounder approach for cost data. If the RMSE/MAE are similar or better, the Gamma model is preferred because it directly models the mean-variance relationship inherent in cost data without requiring transformation of the response variable (and the subsequent bias correction issues when back-transforming).
+
+------------------------------------------------------------------------
+
+## 4. Analysis 2: Predicting Tipping Behavior (Binomial GLM)
+
+### 4.1. Model Specification
+
+We want to predict `tip_got` (1 if tip \> 0, 0 otherwise).
+
+**Theoretical Justification:** Ordinary Least Squares (OLS) regression is mathematically invalid for this binary response variable for two key reasons: 1. **Boundedness**: OLS predictions can fall outside the $[0,1]$ interval, which is nonsensical for probabilities. 2. **Non-Normality**: The error terms for a binary outcome follow a Bernoulli distribution, not a Normal distribution. This violates the homoscedasticity assumption of OLS.
+
+Therefore, we use a **Binomial GLM** with a **Logit Link Function**.
+
+**Data Subset**: We restrict this analysis to **Credit Card trips** (`payment_type == 1`). Cash tips are rarely recorded in the system (creating a mechanical correlation), so excluding them allows us to model actual *tipping behavior* among passengers who have the option to tip on the record.
+
+### 4.2. Fitting the Model
+
+We filter the training and test sets for Credit Card trips and remove `payment_type` from the predictors (as it is now constant).
+
+```{r binomial-glm-2, echo=TRUE}
+# Filter for Credit Card trips only
+train_data_cc <- train_data %>% filter(payment_type == 1)
+test_data_cc  <- test_data %>% filter(payment_type == 1)
+
+# Fit Binomial GLM (excluding payment_type)
+binomial_model <- glm(tip_got ~ trip_distance + fare_amount + tolls_amount + 
+                        passenger_count + pickup_hour + 
+                        day_of_week + VendorID, 
+                      family = binomial(link = "logit"), 
+                      data = train_data_cc)
+
+summary(binomial_model)
+```
+
+### 4.3. Model Performance
+
+The dataset is highly imbalanced (most passengers tip). A standard threshold of 0.5 would classify almost everyone as a "Tipper", failing to identify the minority class ("No Tip"). To address this, we adjust the classification threshold to the **proportion of positives in the training set**.
+
+```{r binomial-eval-2, echo=TRUE}
+# 1. Determine Balanced Threshold
+threshold <- mean(train_data_cc$tip_got)
+cat("Balanced Threshold (Training Proportion):", round(threshold, 4), "\n")
+
+# 2. Predict probabilities
+prob_tip <- predict(binomial_model, newdata = test_data_cc, type = "response")
+
+# 3. Convert to class labels using the balanced threshold
+pred_tip <- ifelse(prob_tip > threshold, 1, 0)
+
+# 4. Evaluation with Sensitivity and Specificity
+conf_matrix <- confusionMatrix(as.factor(pred_tip),
+                               as.factor(test_data_cc$tip_got), positive = "1")
+
+print(conf_matrix$table)
+print(conf_matrix$byClass[c("Sensitivity", "Specificity", "Balanced Accuracy")])
+```
+
+```{r binomial-roc, echo=TRUE, message=FALSE, warning=FALSE, fig.height=4, fig.width=6, dev='png', dpi=300}
+# Sample data for ROC to reduce computation time (Optimization)
+test_data_cc_sample <- test_data_cc %>% sample_n(min(10000, 
+                                                     nrow(test_data_cc)))
+prob_tip_sample <- predict(binomial_model, newdata = test_data_cc_sample, 
+                           type = "response")
+
+# Calculate ROC object
+roc_obj <- roc(test_data_cc_sample$tip_got, prob_tip_sample)
+auc_value <- auc(roc_obj)
+
+# Plot ROC
+ggroc(roc_obj, color = "darkgreen", size = 1.2) +
+  geom_segment(aes(x = 1, xend = 0, y = 0, yend = 1), color = "gray", 
+               linetype = "dashed") +
+  labs(title = paste0("ROC Curve (AUC = ", round(auc_value, 3), ")"),
+       subtitle = "Model Discrimination Capability (Sampled)",
+       x = "Specificity (1 - False Positive Rate)", 
+       y = "Sensitivity (True Positive Rate)") +
+  theme_minimal()
+```
+
+As seen in the ROC plot, the AUC is 0.576, indicating limited global discrimination capability. This confirms that tipping behavior is highly stochastic. However, by using the calibrated threshold of 0.96 (Section 4.3), we successfully extracted practical business value (Specificity \~49%) despite the low global separability.
+
+### 4.7. Interpretation of Coefficients
+
+In a logit model, coefficients represent the change in **log-odds**. Exponentiating them gives the **Odds Ratio (OR)**, which represents the **multiplicative increment of the odds**.
+
+```{r odds-ratios, echo=TRUE}
+odds_ratios <- exp(coef(binomial_model))
+# Display significant odds ratios
+print(head(odds_ratios, 10))
+```
+
+**Statistical Inference Note:** The p-values in the model summary are determined via the **Wald Statistic**. This relies on the asymptotic normality of the Maximum Likelihood Estimators (MLE). A significant p-value ($< 0.05$) indicates that the predictor has a non-zero effect on the log-odds of tipping.
+
+**Key Insight:** For example, if the Odds Ratio for `passenger_count` is 0.9, it means that for each additional passenger, the **odds** of receiving a tip are multiplied by 0.9 (a 10% decrease), holding all other variables constant.
+
+------------------------------------------------------------------------
+
+## 5. Analysis 3: Classifying High-Fare Trips (Binomial GLM)
+
+To contrast with the stochastic nature of tipping, we now model a deterministic physical relationship: predicting whether a trip is "High Fare" (above the median).
+
+### 5.1. Feature Engineering & Model
+
+We define `is_high_fare` as 1 if `total_amount` is greater than the median, and 0 otherwise.
+
+```{r high-fare-model, echo=TRUE}
+# 1. Create Target
+median_total <- median(taxi_model_data$total_amount)
+taxi_high_fare <- taxi_model_data %>%
+  mutate(is_high_fare = ifelse(total_amount > median_total, 1, 0))
+
+# 2. Fit Binomial GLM
+# We expect strong physical predictors: Distance, Tolls
+model_high_fare <- glm(is_high_fare ~ trip_distance + tolls_amount + 
+                         passenger_count + pickup_hour, 
+                       family = binomial(link = "logit"), 
+                       data = taxi_high_fare)
+
+summary(model_high_fare)
+```
+
+### 5.2. Visualization: The Logistic S-Curve
+
+Since `trip_distance` is a dominant predictor of fare, we can visualize the "S-curve" probability transition.
+
+```{r s-curve-plot, echo=TRUE, fig.height=4, fig.width=6, dev='png', dpi=300, warning=FALSE}
+# Add predicted probabilities
+taxi_high_fare <- taxi_high_fare %>%
+  mutate(prob_high = predict(model_high_fare, type = "response"))
+
+# Sample for plotting
+plot_data_s <- taxi_high_fare %>% sample_n(min(2000, nrow(taxi_high_fare)))
+
+ggplot(plot_data_s, aes(x = trip_distance, y = is_high_fare)) +
+  # Jittered points for binary data
+  geom_jitter(height = 0.05, alpha = 0.2, color = "darkgray") +
+  # The fitted logistic curve
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), 
+              color = "blue", size = 1.2, se = FALSE) +
+  labs(title = "Probability of High Fare vs. Trip Distance",
+       subtitle = "Logistic Regression S-Curve",
+       x = "Trip Distance (miles)", 
+       y = "Probability (Is High Fare?)") +
+  theme_minimal() +
+  xlim(0, 15) # Zoom in on the transition zone
+```
+
+### 5.3. Interpretation
+
+```{r high-fare-odds, echo=TRUE}
+# Odds Ratio for Trip Distance
+or_distance <- exp(coef(model_high_fare)["trip_distance"])
+cat("Odds Ratio for Trip Distance:", round(or_distance, 4))
+```
+
+**Interpretation:** The Odds Ratio for `trip_distance` is extremely high (significantly greater than 1). This confirms the deterministic nature of the problem: as distance increases, the probability of crossing the median fare threshold increases rapidly, following the logistic S-curve shape shown above.
+
+------------------------------------------------------------------------
+
+## 6. Peer Feedback Question
+
+**Question:** "In my analysis, I chose to exclude cash trips (`payment_type = 2`) from the Binomial GLM because cash tips are rarely recorded, which would confound the model. By focusing only on Credit Card trips, I aimed to model 'discretionary tipping behavior' rather than 'payment recording artifacts'. Is this exclusion justified, or should I have kept cash trips and used `payment_type` as a control variable to see the full system picture?"
+
+**Answer:** I believe the exclusion is **justified**. If the research question is about *passenger behavior* (who chooses to tip?), including cash trips introduces noise because a "0" tip in a cash ride is ambiguous (could be no tip, or unrecorded tip). By restricting to Credit Card rides, where the tipping prompt is part of the digital flow, a "0" is more reliably a choice not to tip. This makes the coefficients for other predictors (like distance or time) more meaningful for understanding generosity.
+
+------------------------------------------------------------------------
+
+## 7. Exam Question Answer
+
+**Question:** "How should I interpret a log-odds coefficient for a categorical predictor?"
+
+**Answer:** A log-odds coefficient $\beta_j$ for a categorical predictor (e.g., `ColorRed`) represents the **difference in the log-odds** of the outcome occurring between that category (`Red`) and the reference category (e.g., `Blue`), holding all other variables constant. To make this interpretable, we exponentiate the coefficient ($e^{\beta_j}$) to get the **Odds Ratio**. If $e^{\beta_j} = 2$, it means the odds of the event occurring for the `Red` group are **2 times** the odds for the reference group.
